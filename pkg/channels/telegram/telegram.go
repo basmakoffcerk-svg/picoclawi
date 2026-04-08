@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -610,13 +611,19 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	messageIDStr := fmt.Sprintf("%d", message.MessageID)
 	scope := channels.BuildMediaScope("telegram", chatIDStr, messageIDStr)
 
+	workspaceInboundDir := c.workspaceInboundDir()
+
 	// Helper to register a local file with the media store
 	storeMedia := func(localPath, filename string) string {
+		cleanupPolicy := media.CleanupPolicyDeleteOnCleanup
+		if isSubPath(localPath, workspaceInboundDir) {
+			cleanupPolicy = media.CleanupPolicyForgetOnly
+		}
 		if store := c.GetMediaStore(); store != nil {
 			ref, err := store.Store(localPath, media.MediaMeta{
 				Filename:      filename,
 				Source:        "telegram",
-				CleanupPolicy: media.CleanupPolicyDeleteOnCleanup,
+				CleanupPolicy: cleanupPolicy,
 			}, scope)
 			if err == nil {
 				return ref
@@ -661,9 +668,17 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	}
 
 	if message.Audio != nil {
-		audioPath := c.downloadFile(ctx, message.Audio.FileID, ".mp3")
+		audioFilename := strings.TrimSpace(message.Audio.FileName)
+		audioExt := filepath.Ext(audioFilename)
+		if audioExt == "" {
+			audioExt = ".mp3"
+		}
+		audioPath := c.downloadFile(ctx, message.Audio.FileID, audioExt)
 		if audioPath != "" {
-			mediaPaths = append(mediaPaths, storeMedia(audioPath, "audio.mp3"))
+			if audioFilename == "" {
+				audioFilename = "audio" + audioExt
+			}
+			mediaPaths = append(mediaPaths, storeMedia(audioPath, audioFilename))
 			if content != "" {
 				content += "\n"
 			}
@@ -671,10 +686,34 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		}
 	}
 
+	if message.Video != nil {
+		videoFilename := strings.TrimSpace(message.Video.FileName)
+		videoExt := filepath.Ext(videoFilename)
+		if videoExt == "" {
+			videoExt = ".mp4"
+		}
+		videoPath := c.downloadFile(ctx, message.Video.FileID, videoExt)
+		if videoPath != "" {
+			if videoFilename == "" {
+				videoFilename = "video" + videoExt
+			}
+			mediaPaths = append(mediaPaths, storeMedia(videoPath, videoFilename))
+			if content != "" {
+				content += "\n"
+			}
+			content += "[video]"
+		}
+	}
+
 	if message.Document != nil {
-		docPath := c.downloadFile(ctx, message.Document.FileID, "")
+		docFilename := strings.TrimSpace(message.Document.FileName)
+		docExt := filepath.Ext(docFilename)
+		docPath := c.downloadFile(ctx, message.Document.FileID, docExt)
 		if docPath != "" {
-			mediaPaths = append(mediaPaths, storeMedia(docPath, "document"))
+			if docFilename == "" {
+				docFilename = "document"
+			}
+			mediaPaths = append(mediaPaths, storeMedia(docPath, docFilename))
 			if content != "" {
 				content += "\n"
 			}
@@ -862,6 +901,8 @@ func telegramQuotedContent(message *telego.Message) string {
 		parts = append(parts, "[voice]")
 	case message.Audio != nil:
 		parts = append(parts, "[audio]")
+	case message.Video != nil:
+		parts = append(parts, "[video]")
 	}
 	if message.Document != nil {
 		parts = append(parts, "[file]")
@@ -909,14 +950,23 @@ func (c *TelegramChannel) downloadFileWithInfo(file *telego.File, ext string) st
 		return ""
 	}
 
+	if filepath.IsAbs(file.FilePath) {
+		if info, err := os.Stat(file.FilePath); err == nil && !info.IsDir() {
+			if staged := c.stageInboundMedia(file.FilePath, filepath.Base(file.FilePath)+ext, true); staged != "" {
+				return staged
+			}
+		}
+	}
+
 	url := c.bot.FileDownloadURL(file.FilePath)
 	logger.DebugCF("telegram", "File URL", map[string]any{"url": url})
 
 	// Use FilePath as filename for better identification
 	filename := file.FilePath + ext
-	return utils.DownloadFile(url, filename, utils.DownloadOptions{
+	localPath := utils.DownloadFile(url, filename, utils.DownloadOptions{
 		LoggerPrefix: "telegram",
 	})
+	return c.stageInboundMedia(localPath, filename, false)
 }
 
 func (c *TelegramChannel) downloadFile(ctx context.Context, fileID, ext string) string {
@@ -1047,6 +1097,92 @@ func isBotCommandEntityForThisBot(entityText, botUsername string) bool {
 		return false
 	}
 	return strings.EqualFold(mentionUsername, botUsername)
+}
+
+func (c *TelegramChannel) stageInboundMedia(localPath, preferredName string, borrowed bool) string {
+	if localPath == "" {
+		return ""
+	}
+
+	inboundDir := c.workspaceInboundDir()
+	if inboundDir == "" {
+		return localPath
+	}
+	if isSubPath(localPath, inboundDir) {
+		return localPath
+	}
+
+	if err := os.MkdirAll(inboundDir, 0o700); err != nil {
+		logger.WarnCF("telegram", "Failed to create workspace inbound media dir", map[string]any{
+			"dir":   inboundDir,
+			"error": err.Error(),
+		})
+		return localPath
+	}
+
+	filename := utils.SanitizeFilename(preferredName)
+	if filename == "" {
+		filename = utils.SanitizeFilename(filepath.Base(localPath))
+	}
+	if filename == "" {
+		filename = "attachment.bin"
+	}
+
+	destPath := filepath.Join(inboundDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), filename))
+	if err := copyFile(localPath, destPath); err != nil {
+		logger.WarnCF("telegram", "Failed to stage inbound media to workspace", map[string]any{
+			"src":   localPath,
+			"dest":  destPath,
+			"error": err.Error(),
+		})
+		return localPath
+	}
+
+	if !borrowed {
+		_ = os.Remove(localPath)
+	}
+
+	return destPath
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+func isSubPath(path, root string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanRoot := filepath.Clean(root)
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, "..") && rel != "")
+}
+
+func (c *TelegramChannel) workspaceInboundDir() string {
+	if c == nil || c.config == nil {
+		return ""
+	}
+	workspace := strings.TrimSpace(c.config.WorkspacePath())
+	if workspace == "" {
+		return ""
+	}
+	return filepath.Join(workspace, "media", "inbound")
 }
 
 // stripBotMention removes the @bot mention from the content.

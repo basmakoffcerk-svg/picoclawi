@@ -265,6 +265,56 @@ func TestSend_ShortMessage_SingleCall(t *testing.T) {
 	assert.Len(t, caller.calls, 1, "short message should result in exactly one SendMessage call")
 }
 
+func TestStageInboundMedia_SavesToWorkspaceInbound(t *testing.T) {
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			return successResponse(t), nil
+		},
+	}
+	ch := newTestChannel(t, caller)
+
+	tempRoot := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = filepath.Join(tempRoot, "workspace")
+	ch.config = cfg
+
+	srcPath := filepath.Join(tempRoot, "downloaded.bin")
+	require.NoError(t, os.WriteFile(srcPath, []byte("payload"), 0o600))
+
+	staged := ch.stageInboundMedia(srcPath, "report.txt", false)
+	require.NotEmpty(t, staged)
+	assert.True(t, strings.Contains(staged, filepath.Join("media", "inbound")))
+	assert.True(t, isSubPath(staged, filepath.Join(cfg.WorkspacePath(), "media", "inbound")))
+	assert.FileExists(t, staged)
+	assert.NoFileExists(t, srcPath)
+
+	data, err := os.ReadFile(staged)
+	require.NoError(t, err)
+	assert.Equal(t, "payload", string(data))
+}
+
+func TestStageInboundMedia_BorrowedSourceIsNotDeleted(t *testing.T) {
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			return successResponse(t), nil
+		},
+	}
+	ch := newTestChannel(t, caller)
+
+	tempRoot := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = filepath.Join(tempRoot, "workspace")
+	ch.config = cfg
+
+	srcPath := filepath.Join(tempRoot, "shared-source.dat")
+	require.NoError(t, os.WriteFile(srcPath, []byte("shared"), 0o600))
+
+	staged := ch.stageInboundMedia(srcPath, "shared.dat", true)
+	require.NotEmpty(t, staged)
+	assert.FileExists(t, staged)
+	assert.FileExists(t, srcPath)
+}
+
 func TestSend_LongMessage_SingleCall(t *testing.T) {
 	// With WithMaxMessageLength(4000), the Manager pre-splits messages before
 	// they reach Send(). A message at exactly 4000 chars should go through

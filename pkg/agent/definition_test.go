@@ -196,8 +196,8 @@ Follow the body prompt.
 	if !strings.Contains(bootstrap, "SOUL.md") {
 		t.Fatalf("expected bootstrap to label SOUL.md, got %q", bootstrap)
 	}
-	if strings.Contains(bootstrap, "Workspace identity") {
-		t.Fatalf("structured bootstrap should ignore IDENTITY.md, got %q", bootstrap)
+	if !strings.Contains(bootstrap, "Workspace identity") {
+		t.Fatalf("expected bootstrap to include IDENTITY.md, got %q", bootstrap)
 	}
 }
 
@@ -220,7 +220,7 @@ func TestLoadBootstrapFilesIncludesWorkspaceUserMarkdown(t *testing.T) {
 	}
 }
 
-func TestStructuredAgentIgnoresIdentityChanges(t *testing.T) {
+func TestStructuredAgentIdentityChangesInvalidateCache(t *testing.T) {
 	tmpDir := setupWorkspace(t, map[string]string{
 		"AGENT.md":    "# Agent\nFollow the new structure.",
 		"SOUL.md":     "# Soul\nVersion one.",
@@ -231,8 +231,8 @@ func TestStructuredAgentIgnoresIdentityChanges(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 
 	promptV1 := cb.BuildSystemPromptWithCache()
-	if strings.Contains(promptV1, "Legacy identity") {
-		t.Fatalf("structured prompt should not include IDENTITY.md, got %q", promptV1)
+	if !strings.Contains(promptV1, "Legacy identity") {
+		t.Fatalf("structured prompt should include IDENTITY.md, got %q", promptV1)
 	}
 
 	identityPath := filepath.Join(tmpDir, "IDENTITY.md")
@@ -247,13 +247,16 @@ func TestStructuredAgentIgnoresIdentityChanges(t *testing.T) {
 	cb.systemPromptMutex.RLock()
 	changed := cb.sourceFilesChangedLocked()
 	cb.systemPromptMutex.RUnlock()
-	if changed {
-		t.Fatal("IDENTITY.md should not invalidate cache for structured agent definitions")
+	if !changed {
+		t.Fatal("IDENTITY.md changes should invalidate cache")
 	}
 
 	promptV2 := cb.BuildSystemPromptWithCache()
-	if promptV1 != promptV2 {
-		t.Fatal("structured prompt should remain stable after IDENTITY.md changes")
+	if promptV1 == promptV2 {
+		t.Fatal("prompt should change after IDENTITY.md update")
+	}
+	if !strings.Contains(promptV2, "Version two") {
+		t.Fatalf("expected updated identity text in prompt, got %q", promptV2)
 	}
 }
 

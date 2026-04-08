@@ -20,9 +20,10 @@ import (
 // - Long-term memory: memory/MEMORY.md
 // - Daily notes: memory/YYYYMM/YYYYMMDD.md
 type MemoryStore struct {
-	workspace  string
-	memoryDir  string
-	memoryFile string
+	workspace        string
+	memoryDir        string
+	memoryFile       string
+	legacyMemoryFile string
 }
 
 // NewMemoryStore creates a new MemoryStore with the given workspace path.
@@ -30,14 +31,16 @@ type MemoryStore struct {
 func NewMemoryStore(workspace string) *MemoryStore {
 	memoryDir := filepath.Join(workspace, "memory")
 	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
+	legacyMemoryFile := filepath.Join(workspace, "MEMORY.md")
 
 	// Ensure memory directory exists
 	os.MkdirAll(memoryDir, 0o755)
 
 	return &MemoryStore{
-		workspace:  workspace,
-		memoryDir:  memoryDir,
-		memoryFile: memoryFile,
+		workspace:        workspace,
+		memoryDir:        memoryDir,
+		memoryFile:       memoryFile,
+		legacyMemoryFile: legacyMemoryFile,
 	}
 }
 
@@ -52,6 +55,9 @@ func (ms *MemoryStore) getTodayFile() string {
 // ReadLongTerm reads the long-term memory (MEMORY.md).
 // Returns empty string if the file doesn't exist.
 func (ms *MemoryStore) ReadLongTerm() string {
+	if data, err := os.ReadFile(ms.legacyMemoryFile); err == nil {
+		return string(data)
+	}
 	if data, err := os.ReadFile(ms.memoryFile); err == nil {
 		return string(data)
 	}
@@ -60,9 +66,13 @@ func (ms *MemoryStore) ReadLongTerm() string {
 
 // WriteLongTerm writes content to the long-term memory file (MEMORY.md).
 func (ms *MemoryStore) WriteLongTerm(content string) error {
+	target := ms.memoryFile
+	if _, err := os.Stat(ms.legacyMemoryFile); err == nil {
+		target = ms.legacyMemoryFile
+	}
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
 	// Using 0o600 (owner read/write only) for secure default permissions.
-	return fileutil.WriteFileAtomic(ms.memoryFile, []byte(content), 0o600)
+	return fileutil.WriteFileAtomic(target, []byte(content), 0o600)
 }
 
 // ReadToday reads today's daily note.

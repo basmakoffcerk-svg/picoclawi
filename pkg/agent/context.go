@@ -19,6 +19,16 @@ import (
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
+const (
+	bootstrapMaxCharsDefault      = 20_000
+	bootstrapTotalMaxCharsDefault = 150_000
+)
+
+type bootstrapSection struct {
+	label   string
+	content string
+}
+
 type ContextBuilder struct {
 	workspace          string
 	skillsLoader       *skills.SkillsLoader
@@ -90,7 +100,7 @@ You are picoclaw, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: %s
-- Memory: %s/memory/MEMORY.md
+- Memory: %s/MEMORY.md (compat) and %s/memory/MEMORY.md
 - Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md
 - Skills: %s/skills/{skill-name}/SKILL.md
 
@@ -105,7 +115,7 @@ Your workspace is at: %s
 4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.
 
 %s`,
-		version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
+		version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
 }
 
 func (cb *ContextBuilder) getDiscoveryRule() string {
@@ -436,36 +446,96 @@ func skillFilesChangedSince(skillRoots []string, filesAtCache map[string]time.Ti
 }
 
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
-	var sb strings.Builder
-
 	agentDefinition := cb.LoadAgentDefinition()
-	if agentDefinition.Agent != nil {
-		label := string(agentDefinition.Source)
-		if label == "" {
-			label = relativeWorkspacePath(cb.workspace, agentDefinition.Agent.Path)
+	sections := make([]bootstrapSection, 0, 9)
+
+	if agentDefinition.Agent != nil && strings.TrimSpace(agentDefinition.Agent.Body) != "" {
+		label := relativeWorkspacePath(cb.workspace, agentDefinition.Agent.Path)
+		if strings.TrimSpace(label) == "" {
+			label = string(agentDefinition.Source)
 		}
-		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", label, agentDefinition.Agent.Body)
+		sections = append(sections, bootstrapSection{
+			label:   label,
+			content: agentDefinition.Agent.Body,
+		})
 	}
-	if agentDefinition.Soul != nil {
-		fmt.Fprintf(
-			&sb,
-			"## %s\n\n%s\n\n",
-			relativeWorkspacePath(cb.workspace, agentDefinition.Soul.Path),
-			agentDefinition.Soul.Content,
-		)
+	if agentDefinition.Soul != nil && strings.TrimSpace(agentDefinition.Soul.Content) != "" {
+		sections = append(sections, bootstrapSection{
+			label:   relativeWorkspacePath(cb.workspace, agentDefinition.Soul.Path),
+			content: agentDefinition.Soul.Content,
+		})
 	}
-	if agentDefinition.User != nil {
-		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "USER.md", agentDefinition.User.Content)
+	if content := cb.readWorkspaceFile("TOOLS.md"); strings.TrimSpace(content) != "" {
+		sections = append(sections, bootstrapSection{label: "TOOLS.md", content: content})
+	}
+	if content := cb.readWorkspaceFile("IDENTITY.md"); strings.TrimSpace(content) != "" {
+		sections = append(sections, bootstrapSection{label: "IDENTITY.md", content: content})
+	}
+	if agentDefinition.User != nil && strings.TrimSpace(agentDefinition.User.Content) != "" {
+		sections = append(sections, bootstrapSection{label: "USER.md", content: agentDefinition.User.Content})
+	}
+	if content := cb.readWorkspaceFile("HEARTBEAT.md"); strings.TrimSpace(content) != "" {
+		sections = append(sections, bootstrapSection{label: "HEARTBEAT.md", content: content})
+	}
+	if content := cb.readWorkspaceFile("BOOTSTRAP.md"); strings.TrimSpace(content) != "" {
+		sections = append(sections, bootstrapSection{label: "BOOTSTRAP.md", content: content})
+	}
+	if memoryRoot := cb.readWorkspaceFile("MEMORY.md"); strings.TrimSpace(memoryRoot) != "" {
+		sections = append(sections, bootstrapSection{label: "MEMORY.md", content: memoryRoot})
+	} else if memoryAlt := cb.readWorkspaceFile("memory.md"); strings.TrimSpace(memoryAlt) != "" {
+		sections = append(sections, bootstrapSection{label: "memory.md", content: memoryAlt})
 	}
 
-	if agentDefinition.Source != AgentDefinitionSourceAgent {
-		filePath := filepath.Join(cb.workspace, "IDENTITY.md")
-		if data, err := os.ReadFile(filePath); err == nil {
-			fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "IDENTITY.md", data)
+	if len(sections) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	remaining := bootstrapTotalMaxCharsDefault
+	truncatedCount := 0
+
+	for _, section := range sections {
+		content, truncated := truncateChars(section.content, bootstrapMaxCharsDefault)
+		if remaining <= 0 {
+			break
 		}
+		content, totalTruncated := truncateChars(content, remaining)
+		if truncated || totalTruncated {
+			truncatedCount++
+		}
+		remaining -= len([]rune(content))
+		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", section.label, content)
+	}
+
+	if truncatedCount > 0 {
+		fmt.Fprintf(&sb,
+			"## Bootstrap Truncation\n\nSome bootstrap files were truncated to keep prompt stable (max/file=%d, max/total=%d).\n\n",
+			bootstrapMaxCharsDefault,
+			bootstrapTotalMaxCharsDefault,
+		)
 	}
 
 	return sb.String()
+}
+
+func (cb *ContextBuilder) readWorkspaceFile(name string) string {
+	path := filepath.Join(cb.workspace, name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func truncateChars(content string, maxChars int) (string, bool) {
+	if maxChars <= 0 {
+		return "", content != ""
+	}
+	runes := []rune(content)
+	if len(runes) <= maxChars {
+		return content, false
+	}
+	return string(runes[:maxChars]), true
 }
 
 // buildDynamicContext returns a short dynamic context string with per-request info.
