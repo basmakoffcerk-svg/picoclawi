@@ -159,15 +159,23 @@ PicoClaw can be deployed on virtually any Linux device!
 
 This modified version keeps the same installation flow as the original PicoClaw so it can be installed on desktop, server, SBC, and Android/Termux with minimal friction.
 
-### Option 1: Download from picoclaw.io (Recommended, same as original)
+### Option 1: One-line installer for this fork
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/basmakoffcerk-svg/picoclawi/main/install.sh | sh
+```
+
+This installs the latest release from this repository into `~/.local/bin`, following the same lightweight binary-based flow as the original PicoClaw install guide.
+
+### Option 2: Download from picoclaw.io (Recommended, same as original)
 
 Visit **[picoclaw.io](https://picoclaw.io)** — the official website auto-detects your platform and provides one-click download. No need to manually pick an architecture.
 
-### Option 2: Download precompiled binary (same as original)
+### Option 3: Download precompiled binary (same as original)
 
-Alternatively, download the binary for your platform from the [GitHub Releases](https://github.com/sipeed/picoclaw/releases) page.
+Alternatively, download the binary for your platform from the [GitHub Releases](https://github.com/basmakoffcerk-svg/picoclawi/releases) page.
 
-### Option 3: Build from source (same as original)
+### Option 4: Build from source (same as original)
 
 ```bash
 git clone https://github.com/sipeed/picoclaw.git
@@ -193,7 +201,7 @@ make install
 
 **Raspberry Pi Zero 2 W:** Use the binary that matches your OS: 32-bit Raspberry Pi OS -> `make build-linux-arm`; 64-bit -> `make build-linux-arm64`. Or run `make build-pi-zero` to build both.
 
-### Install this modified build from this repository
+### Option 5: Build this modified build from this repository
 
 ```bash
 git clone https://github.com/basmakoffcerk-svg/picoclawi.git
@@ -208,6 +216,15 @@ Run:
 ./build/picoclaw-darwin-amd64 version   # macOS x64 example
 ./build/picoclaw-linux-arm64 version    # Linux ARM64 example
 ```
+
+### Supported install targets
+
+This fork keeps the same practical install model as PicoClaw itself:
+
+- macOS: prebuilt binary or `make build`
+- Linux servers and desktops: prebuilt binary, `install.sh`, or `make build`
+- ARM boards: download matching release artifact or build with `make build-linux-arm64` / `make build-linux-arm`
+- Termux / Android with proot: use the Linux ARM64 binary or build from source inside your environment
 
 ## 🚀 Quick Start Guide
 
