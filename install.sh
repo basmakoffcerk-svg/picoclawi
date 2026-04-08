@@ -53,7 +53,10 @@ detect_arch() {
 
 download_latest_tag() {
   api_url="https://api.github.com/repos/$OWNER/$REPO/releases/latest"
-  curl -fsSL "$api_url" | awk -F '"' '/"tag_name":/ { print $4; exit }'
+  curl -fsSL \
+    -H "Accept: application/vnd.github+json" \
+    -H "User-Agent: picoclaw-installer" \
+    "$api_url" | awk -F '"' '/"tag_name":/ { print $4; exit }'
 }
 
 download_asset() {
@@ -102,6 +105,7 @@ main() {
 
   if [ -z "$tag" ]; then
     echo "Failed to determine latest release tag." >&2
+    echo "Make sure this repository has at least one published GitHub Release." >&2
     exit 1
   fi
 
