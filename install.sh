@@ -20,6 +20,64 @@ need_cmd() {
   }
 }
 
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+resolve_sudo() {
+  if [ "$(id -u)" -eq 0 ]; then
+    echo ""
+    return 0
+  fi
+  if has_cmd sudo; then
+    echo "sudo"
+    return 0
+  fi
+  return 1
+}
+
+install_build_deps() {
+  missing=""
+  for cmd in git make go; do
+    if ! has_cmd "$cmd"; then
+      missing="$missing $cmd"
+    fi
+  done
+
+  [ -z "$missing" ] && return 0
+
+  echo "Missing build dependencies:$missing"
+  echo "Attempting automatic dependency installation..."
+
+  sudo_cmd="$(resolve_sudo || true)"
+
+  if has_cmd apt-get; then
+    ${sudo_cmd:+$sudo_cmd }apt-get update -y
+    ${sudo_cmd:+$sudo_cmd }apt-get install -y git make golang-go ca-certificates
+  elif has_cmd apk; then
+    ${sudo_cmd:+$sudo_cmd }apk add --no-cache git make go ca-certificates
+  elif has_cmd dnf; then
+    ${sudo_cmd:+$sudo_cmd }dnf install -y git make golang ca-certificates
+  elif has_cmd yum; then
+    ${sudo_cmd:+$sudo_cmd }yum install -y git make golang ca-certificates
+  elif has_cmd pacman; then
+    ${sudo_cmd:+$sudo_cmd }pacman -Sy --noconfirm git make go ca-certificates
+  elif has_cmd zypper; then
+    ${sudo_cmd:+$sudo_cmd }zypper --non-interactive install git make go ca-certificates
+  elif has_cmd pkg; then
+    ${sudo_cmd:+$sudo_cmd }pkg update -y
+    ${sudo_cmd:+$sudo_cmd }pkg install -y git make golang
+  elif has_cmd brew; then
+    brew install git make go
+  else
+    echo "No supported package manager found for auto-install." >&2
+  fi
+
+  for cmd in git make go; do
+    need_cmd "$cmd"
+  done
+}
+
 detect_os() {
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$os" in
@@ -112,8 +170,10 @@ print_next_steps() {
 }
 
 install_from_source() {
+  install_build_deps
   need_cmd git
   need_cmd make
+  need_cmd go
 
   src_dir="$TMP_DIR/src"
   repo_url="https://github.com/$OWNER/$REPO.git"
