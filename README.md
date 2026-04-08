@@ -24,7 +24,10 @@
 
 ---
 
-> **PicoClaw** is an independent open-source project initiated by [Sipeed](https://sipeed.com), written entirely in **Go** from scratch — not a fork of OpenClaw, NanoBot, or any other project.
+> **This repository is a modified build of the original PicoClaw project.**
+> Base project: [sipeed/picoclaw](https://github.com/sipeed/picoclaw)
+>
+> Changes in this fork focus on auth/provider workflow improvements (including Codex/Qwen login flow in CLI), while keeping compatibility with standard PicoClaw setup and runtime.
 
 **PicoClaw** is an ultra-lightweight personal AI assistant inspired by [NanoBot](https://github.com/HKUDS/nanobot). It was rebuilt from the ground up in **Go** through a "self-bootstrapping" process — the AI Agent itself drove the architecture migration and code optimization.
 
@@ -154,15 +157,17 @@ PicoClaw can be deployed on virtually any Linux device!
 
 ## 📦 Install
 
-### Download from picoclaw.io (Recommended)
+This modified version keeps the same installation flow as the original PicoClaw so it can be installed on desktop, server, SBC, and Android/Termux with minimal friction.
+
+### Option 1: Download from picoclaw.io (Recommended, same as original)
 
 Visit **[picoclaw.io](https://picoclaw.io)** — the official website auto-detects your platform and provides one-click download. No need to manually pick an architecture.
 
-### Download precompiled binary
+### Option 2: Download precompiled binary (same as original)
 
 Alternatively, download the binary for your platform from the [GitHub Releases](https://github.com/sipeed/picoclaw/releases) page.
 
-### Build from source (for development)
+### Option 3: Build from source (same as original)
 
 ```bash
 git clone https://github.com/sipeed/picoclaw.git
@@ -187,6 +192,22 @@ make install
 ```
 
 **Raspberry Pi Zero 2 W:** Use the binary that matches your OS: 32-bit Raspberry Pi OS -> `make build-linux-arm`; 64-bit -> `make build-linux-arm64`. Or run `make build-pi-zero` to build both.
+
+### Install this modified build from this repository
+
+```bash
+git clone https://github.com/basmakoffcerk-svg/picoclawi.git
+cd picoclawi
+make deps
+make build
+```
+
+Run:
+
+```bash
+./build/picoclaw-darwin-amd64 version   # macOS x64 example
+./build/picoclaw-linux-arm64 version    # Linux ARM64 example
+```
 
 ## 🚀 Quick Start Guide
 
@@ -588,6 +609,7 @@ Connect PicoClaw to the Agent Social Network simply by sending a single message 
 | `picoclaw skills list`    | List installed skills            |
 | `picoclaw skills install` | Install a skill                  |
 | `picoclaw migrate`        | Migrate data from older versions |
+| `picoclaw login`          | Interactive provider + model setup |
 | `picoclaw auth login`     | Authenticate with providers      |
 
 ### ⏰ Scheduled Tasks / Reminders
