@@ -38,7 +38,7 @@ resolve_sudo() {
 
 install_build_deps() {
   missing=""
-  for cmd in git make go; do
+  for cmd in git go; do
     if ! has_cmd "$cmd"; then
       missing="$missing $cmd"
     fi
@@ -53,27 +53,27 @@ install_build_deps() {
 
   if has_cmd apt-get; then
     ${sudo_cmd:+$sudo_cmd }apt-get update -y
-    ${sudo_cmd:+$sudo_cmd }apt-get install -y git make golang-go ca-certificates
+    ${sudo_cmd:+$sudo_cmd }apt-get install -y git golang-go ca-certificates
   elif has_cmd apk; then
-    ${sudo_cmd:+$sudo_cmd }apk add --no-cache git make go ca-certificates
+    ${sudo_cmd:+$sudo_cmd }apk add --no-cache git go ca-certificates
   elif has_cmd dnf; then
-    ${sudo_cmd:+$sudo_cmd }dnf install -y git make golang ca-certificates
+    ${sudo_cmd:+$sudo_cmd }dnf install -y git golang ca-certificates
   elif has_cmd yum; then
-    ${sudo_cmd:+$sudo_cmd }yum install -y git make golang ca-certificates
+    ${sudo_cmd:+$sudo_cmd }yum install -y git golang ca-certificates
   elif has_cmd pacman; then
-    ${sudo_cmd:+$sudo_cmd }pacman -Sy --noconfirm git make go ca-certificates
+    ${sudo_cmd:+$sudo_cmd }pacman -Sy --noconfirm git go ca-certificates
   elif has_cmd zypper; then
-    ${sudo_cmd:+$sudo_cmd }zypper --non-interactive install git make go ca-certificates
+    ${sudo_cmd:+$sudo_cmd }zypper --non-interactive install git go ca-certificates
   elif has_cmd pkg; then
     ${sudo_cmd:+$sudo_cmd }pkg update -y
-    ${sudo_cmd:+$sudo_cmd }pkg install -y git make golang
+    ${sudo_cmd:+$sudo_cmd }pkg install -y git golang
   elif has_cmd brew; then
-    brew install git make go
+    brew install git go
   else
     echo "No supported package manager found for auto-install." >&2
   fi
 
-  for cmd in git make go; do
+  for cmd in git go; do
     need_cmd "$cmd"
   done
 }
@@ -172,7 +172,6 @@ print_next_steps() {
 install_from_source() {
   install_build_deps
   need_cmd git
-  need_cmd make
   need_cmd go
 
   src_dir="$TMP_DIR/src"
@@ -183,13 +182,10 @@ install_from_source() {
   git clone --depth=1 "$repo_url" "$src_dir"
   (
     cd "$src_dir"
-    make build
+    mkdir -p build
+    echo "Building portable picoclaw binary..."
+    CGO_ENABLED=0 go build -v -tags goolm,stdjson -ldflags "-s -w" -o "build/picoclaw" ./cmd/picoclaw
     install -m 0755 "build/picoclaw" "$INSTALL_DIR/picoclaw"
-    # Launcher binaries are optional in fallback mode.
-    make build-launcher >/dev/null 2>&1 || true
-    [ -f "build/picoclaw-launcher" ] && install -m 0755 "build/picoclaw-launcher" "$INSTALL_DIR/picoclaw-launcher" || true
-    make build-launcher-tui >/dev/null 2>&1 || true
-    [ -f "build/picoclaw-launcher-tui" ] && install -m 0755 "build/picoclaw-launcher-tui" "$INSTALL_DIR/picoclaw-launcher-tui" || true
   )
   echo "Installed $INSTALL_DIR/picoclaw (source build)"
 }
