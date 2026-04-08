@@ -5,6 +5,7 @@ set -eu
 OWNER="${PICOCLAW_REPO_OWNER:-basmakoffcerk-svg}"
 REPO="${PICOCLAW_REPO_NAME:-picoclawi}"
 INSTALL_DIR="${PICOCLAW_INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_FROM_SOURCE="${PICOCLAW_INSTALL_FROM_SOURCE:-0}"
 TMP_DIR="${TMPDIR:-/tmp}/picoclaw-install.$$"
 
 cleanup() {
@@ -53,10 +54,26 @@ detect_arch() {
 
 download_latest_tag() {
   api_url="https://api.github.com/repos/$OWNER/$REPO/releases/latest"
-  curl -fsSL \
+  tag="$(curl -fsSL \
     -H "Accept: application/vnd.github+json" \
     -H "User-Agent: picoclaw-installer" \
-    "$api_url" | awk -F '"' '/"tag_name":/ { print $4; exit }'
+    "$api_url" 2>/dev/null | awk -F '"' '/"tag_name":/ { print $4; exit }' || true)"
+  if [ -n "$tag" ]; then
+    echo "$tag"
+    return 0
+  fi
+
+  # Fallback for API rate limits / 403: resolve redirects from /releases/latest.
+  latest_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+    "https://github.com/$OWNER/$REPO/releases/latest" 2>/dev/null || true)"
+  case "$latest_url" in
+    *"/releases/tag/"*)
+      echo "${latest_url##*/}"
+      return 0
+      ;;
+  esac
+
+  return 1
 }
 
 download_asset() {
@@ -94,24 +111,60 @@ print_next_steps() {
   echo "  picoclaw agent -m \"hello\""
 }
 
+install_from_source() {
+  need_cmd git
+  need_cmd make
+
+  src_dir="$TMP_DIR/src"
+  repo_url="https://github.com/$OWNER/$REPO.git"
+
+  echo "Release artifacts unavailable. Falling back to source build."
+  echo "Cloning $repo_url"
+  git clone --depth=1 "$repo_url" "$src_dir"
+  (
+    cd "$src_dir"
+    make build
+    install -m 0755 "build/picoclaw" "$INSTALL_DIR/picoclaw"
+    # Launcher binaries are optional in fallback mode.
+    make build-launcher >/dev/null 2>&1 || true
+    [ -f "build/picoclaw-launcher" ] && install -m 0755 "build/picoclaw-launcher" "$INSTALL_DIR/picoclaw-launcher" || true
+    make build-launcher-tui >/dev/null 2>&1 || true
+    [ -f "build/picoclaw-launcher-tui" ] && install -m 0755 "build/picoclaw-launcher-tui" "$INSTALL_DIR/picoclaw-launcher-tui" || true
+  )
+  echo "Installed $INSTALL_DIR/picoclaw (source build)"
+}
+
 main() {
+  need_cmd install
+
+  mkdir -p "$INSTALL_DIR"
+
+  if [ "$INSTALL_FROM_SOURCE" = "1" ]; then
+    install_from_source
+    print_next_steps
+    return 0
+  fi
+
   need_cmd curl
   need_cmd tar
-  need_cmd install
 
   os="$(detect_os)"
   arch="$(detect_arch)"
-  tag="$(download_latest_tag)"
+  tag="$(download_latest_tag || true)"
 
-  if [ -z "$tag" ]; then
-    echo "Failed to determine latest release tag." >&2
-    echo "Make sure this repository has at least one published GitHub Release." >&2
-    exit 1
+  if [ -n "$tag" ]; then
+    echo "Latest release: $tag"
+    if download_asset "$tag" "$os" "$arch"; then
+      install_binaries
+      print_next_steps
+      return 0
+    fi
+    echo "Release asset for $os/$arch not found under tag $tag." >&2
+  else
+    echo "Could not determine latest release tag (possibly API rate limit or no release yet)." >&2
   fi
 
-  echo "Latest release: $tag"
-  download_asset "$tag" "$os" "$arch"
-  install_binaries
+  install_from_source
   print_next_steps
 }
 
